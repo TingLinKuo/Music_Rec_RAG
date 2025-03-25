@@ -1,0 +1,7 @@
+python = 3.11.9
+ipykernel
+jupyter notenook
+transformers
+torch
+librosa
+numpy
