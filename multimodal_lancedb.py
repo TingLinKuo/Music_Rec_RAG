@@ -6,14 +6,34 @@ from typing import List, Dict
 
 def combine_info(music_df):
     """
-    Combines Mood, Video Theme, Instrument, Genre, LMM Desciption, into a single string for each row in the DataFrame.
+    Combines Tags and LMM Desciption into a single string for each row in the DataFrame.
     
     Returns:
     pd.DataFrame: The updated DataFrame with a new 'combined_info' column.
     """
-    music_df['combined_info'] = music_df.apply(
-        lambda row: f"Moods: {row['Mood']}. Video Themes: {row['Video Theme']}. Instruments: {row['Instrument']}. Genres: {row['Genre']}. Description: {row['LMM Desciption']}", axis=1
+    # Let nan as empty string
+    target_columns = ["Mood", "Genre", "Instrument", "Video Theme", "Others"]
+
+    for col in target_columns:
+        music_df[col] = music_df[col].apply(
+        lambda x: "" if pd.isna(x) or str(x).strip().lower() in ["nan", "none"] else str(x).strip()
     )
+    
+    # Drop useless columns
+    music_df = music_df.drop(columns=["Useless"], errors='ignore')
+
+    music_df['combined_info'] = music_df.apply(
+        lambda row: ( 
+            f"Moods: {row['Mood']}. "
+            f"Video Themes: {row['Video Theme']}. "
+            f"Instruments: {row['Instrument']}. "
+            f"Genres: {row['Genre']}. "
+            f"Other tags: {row['Others']}. "
+            f"Description: {row['LMM Description']}"
+        ),
+        axis=1
+    )
+
     return music_df
 
 class MusicDatabase:
@@ -42,26 +62,37 @@ class MusicDatabase:
         try:
             df = pd.read_csv(csv_path)
             df = combine_info(df)
-            required_columns = ["source", "song_name", "artist", "Classification", "Mood", "Video Theme", "Instrument", "Genre", "BPM", "LMM Desciption", "Number", "combined_info"]
+            required_columns = [ 
+                "source", "song_name", "artist", 
+                "Classification", 
+                # tags
+                "Mood", "Video Theme", "Instrument", "Genre", "BPM", "Others",
+                # description
+                "LMM Description", 
+                # combined info from combine_info function
+                "combined_info"]
 
-            # Verify CSV structure
+            # Verify CSV structure, check for required columns
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
                 raise ValueError(f"Missing required columns in CSV: {missing_columns}")
-
+            
+            # VER type to str
             exclude_column = "BPM"
             for column in df.columns:
                 if column != exclude_column:
                     df[column] = df[column].astype(str)
 
             # Process each row
-            records = []
+            text_records = []
             audio_records = []
             
             for _, row in df.iterrows():
                 # Generate text embedding
                 text_vector = embedding_processor.get_text_embedding(row['combined_info'], use_clap=False)
                 text_vector = [float(x) for x in text_vector]              
+                
+                # generate text table record, this is schema for table in lancedb
                 record = {
                     "source": row["source"],
                     "song_name": row["song_name"],
@@ -70,12 +101,13 @@ class MusicDatabase:
                     "video_theme": row["Video Theme"],
                     "instrument": row["Instrument"],
                     "genre": row["Genre"],
-                    "bpm": int(row["BPM"]),
-                    "lmm_description": row["LMM Desciption"],
+                    "other_tags": row["Others"],
+                    "bpm": int(row["BPM"]) if pd.notna(row["BPM"]) and row["BPM"] != "" else None,
+                    "lmm_description": row["LMM Description"],
                     "combined_info": row["combined_info"],
                     "text_vector": text_vector
                 }
-                records.append(record)
+                text_records.append(record)
                 
                 # Generate audio paths
                 audio_path = self.generate_audio_path(row['artist'], row['song_name'])
@@ -87,8 +119,8 @@ class MusicDatabase:
 
             # Add to database
             table = self.db.open_table(self.tables["text"])
-            table.add(records)
-            print(f"Successfully imported {len(records)} records from {csv_path}")
+            table.add(text_records)
+            print(f"Successfully imported {len(text_records)} records from {csv_path}")
 
             return audio_records
             
@@ -98,18 +130,28 @@ class MusicDatabase:
 
     def generate_audio_path(self, artist: str, song_name: str) -> str:
         # Generate the audio file path based on artist and song name
-        return os.path.join(self.music_dir, f"{artist} - {song_name}.mp3")
+        base_name = f"{artist} - {song_name}"
+        mp3_path = os.path.join(self.music_dir, base_name + ".mp3")
+        wav_path = os.path.join(self.music_dir, base_name + ".wav")
+
+        if os.path.exists(mp3_path):
+            return mp3_path
+        elif os.path.exists(wav_path):
+            return wav_path
+        else:
+            raise FileNotFoundError(f"cannot find {base_name}.mp3 or .wav")
+        
     
     def initialize_tables(self, vector_dims: Dict[str, int]):
         """Initialize database tables if they don't exist"""
-        # Schema for audio embeddings
+        # Schema for audio table
         audio_schema = pa.schema([
             pa.field("song_name", pa.string()),
             pa.field("song_path", pa.string()),
             pa.field("audio_vector", pa.list_(pa.float32(), vector_dims['audio']))
         ])
         
-        # Schema for text descriptions
+        # Schema for text table
         text_schema = pa.schema([
             pa.field("source", pa.string()),
             pa.field("song_name", pa.string()),
@@ -118,6 +160,7 @@ class MusicDatabase:
             pa.field("video_theme", pa.string()),
             pa.field("genre", pa.string()),
             pa.field("instrument", pa.string()),
+            pa.field("other_tags", pa.string()),
             pa.field("bpm", pa.int32()),
             pa.field("lmm_description", pa.string()),
             pa.field("combined_info", pa.string()),
@@ -145,9 +188,13 @@ class MusicDatabase:
         table = self.db.open_table(self.tables["text"])
         table.add([song_data])
     
-    def search_songs(self, query_vector: List[float], table_name: str, top_k: int = 5) -> pd.DataFrame:
-        """Search for similar songs in specified table"""
+    def search_songs(self, query_vector: List[float], table_name: str, top_k: int,  metric: str = "cosine") -> pd.DataFrame:
+        """
+        Search for similar songs in specified table
+        By default, l2 will be used as metric type. (歐基里德距離)
+        LanceDb supports cosine and dot production as well.
+        """
+        assert metric in {"l2", "cosine", "dot"}, f"Unsupported metric: {metric}"
         table = self.db.open_table(table_name)
-        #vector_column = "audio_vector" if table_name == self.tables["audio"] else "text_vector"
-        return table.search(query_vector).limit(top_k).to_df()
+        return table.search(query_vector).metric(metric).limit(top_k).to_df()
     
