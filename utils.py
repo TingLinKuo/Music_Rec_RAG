@@ -7,7 +7,9 @@ from typing import List, Dict, Tuple
 from openai import OpenAI
 import os
 from multimodal_lancedb import MusicDatabase
+from lancedb.rerankers import CohereReranker
 import lancedb
+import pyarrow as pa
 
 class EmbeddingProcessor:
     def __init__(self, clap_model_name: str = "laion/clap-htsat-unfused"):
@@ -112,57 +114,7 @@ class MusicSearchSystem:
         """
         ranker = Ranker(db=self.db, weight=(0.3, 0.7))
         recommendations = ranker.ranking_score_based(query, top_k)
-        
-        # # Get query embeddings
-        # clap_vector = self.embedding_processor.get_text_embedding(query, use_clap=True)
-        # openai_vector = self.embedding_processor.get_text_embedding(query, use_clap=False)
-        
-        # # Search in both tables
-        # audio_results = self.db.search_songs(clap_vector, self.db.tables["audio"], top_k)
-        # text_results = self.db.search_songs(openai_vector, self.db.tables["text"], top_k)
-        
-        # # Print individual search results
-        # print("Audio Search Results:")
-        # for _, row in audio_results.iterrows():
-        #     print(f"- {row['song_name']}")
-    
-        # print("\nText Search Results:")
-        # for _, row in text_results.iterrows():
-        #     print(f"- {row['song_name']} by {row['artist']}")
-
-        # # Find overlapping recommendations
-        # common_songs = set(audio_results['song_name']) & set(text_results['song_name'])
-        # final_recommendations = text_results[text_results['song_name'].isin(common_songs)]
-        
-        # if len(final_recommendations) == 0:
-        #     return "No matching songs found in both audio and text searches."
-        
-        #  # Get audio paths for final recommendations
-        # audio_paths = []
-        # for _, row in final_recommendations.iterrows():
-        #     audio_path = self.db.generate_audio_path(row['artist'], row['song_name'])
-        #     if os.path.exists(audio_path):
-        #         audio_paths.append(audio_path)
-
-        # # Format recommendations for LLM
-        # recommendations = []
-        # for _, row in final_recommendations.iterrows():
-        #     recommendation = {
-        #         "song_name": row["song_name"],
-        #         "artist": row["artist"],
-        #         "mood": row["mood"],
-        #         "video_theme": row["video_theme"],
-        #         "genre": row["genre"],
-        #         "instrument": row["instrument"],
-        #         "bpm": row["bpm"],
-        #         "description": row["lmm_description"],
-        #         # This is from LanceDB return 
-        #         "similarity_score": float(row["_distance"])
-        #     }
-        #     recommendations.append(recommendation)
-        
-        # Generate explanation using LLM
-        # explanation = self._generate_explanation(query, recommendations)
+        # recommendations = ranker.ranking_text_then_audio_rerank(query, top_k)
 
         return {
             "final_results": recommendations,
@@ -229,6 +181,7 @@ class Ranker:
         # Initialize weights
         self.audio_weight = weight[0]
         self.text_weight = weight[1]
+        self.reranker = CohereReranker(model_name="rerank-english-v3.0")
     
     # for Score-based (加權融合)
     def ranking_score_based(self, query: str, top_k: int = 200) -> List[Dict]:
@@ -240,9 +193,6 @@ class Ranker:
         audio_results = self.db.search_songs(clap_vector, self.db.tables["audio"], top_k)
         text_results = self.db.search_songs(openai_vector, self.db.tables["text"], top_k)
 
-        # print(audio_results)
-        # print(text_results)
-        
         # Add source label
         audio_results = audio_results.copy()
         audio_results["source"] = "audio"
@@ -333,9 +283,42 @@ class Ranker:
 
         grouped["audio_path"] = grouped.apply(resolve_audio_path, axis=1)
 
+        # === Rerank using Cohere ===
+        rerank_top_n = 10  # choose n to do rerank
+        top_songs = grouped.sort_values("score", ascending=False).head(rerank_top_n)
+        subset = text_df[text_df["song_name"].isin(top_songs["song_name"])]
+        
+        subset = subset.copy()
+        subset_records = []
+        for _, row in subset.iterrows():            
+            record = {
+                "song_name": row["song_name"],
+                "text": row["combined_info"],
+                "text_vector": row["text_vector"]
+            }
+            subset_records.append(record)
+
+        subset_schema = pa.schema([
+            pa.field("song_name", pa.string()),
+            pa.field("text", pa.string()),
+            pa.field("text_vector", pa.list_(pa.float32(), 1536))
+        ])
+
+        temp_db = lancedb.connect("./.lancedb_temp")
+        if "rerank_tmp" in temp_db.table_names():
+            temp_db.drop_table("rerank_tmp")
+        temp_table = temp_db.create_table("rerank_tmp", schema = subset_schema, mode="overwrite")
+        temp_table.add(subset_records)
+        results = temp_table.search(openai_vector, vector_column_name = 'text_vector').rerank(reranker=self.reranker, query_string=query).to_df()
+        
+        # Merge rerank results with original data
+        top_songs = top_songs.merge(results[["song_name", "_relevance_score"]], on="song_name", how="left")
+        top_songs = top_songs.sort_values("_relevance_score", ascending=False)
+        
         # Format final output for LLM explanation or downstream use
         final_recommendations = []
-        for _, row in grouped.sort_values("score", ascending=False).head(top_k).iterrows():
+        for _, row in top_songs.sort_values("_relevance_score", ascending=False).head(rerank_top_n).iterrows():
+        # for _, row in grouped.sort_values("score", ascending=False).head(top_k).iterrows():
             final_recommendations.append({
                 "song_name": row["song_name"],
                 "artist": row["artist"],
@@ -350,8 +333,50 @@ class Ranker:
                 "similarity_score": row["score"],
                 "similarity_audio": 1 - row["audio_normalized_distance"],
                 "similarity_text": 1 - row["text_normalized_distance"],
-                "sorce": row["source"],
+                "source": row["source"],
+                "rerank_score": row["_relevance_score"],
                 "audio_path": row["audio_path"]
+            })
+        
+        return final_recommendations
+    
+    # usefull function because its result is not good
+    def ranking_text_then_audio_rerank(self, query: str, top_k: int = 20) -> List[Dict]:
+        # text then audio rerank
+        clap_vector = self.embedding_processor.get_text_embedding(query, use_clap=True)
+        openai_vector = self.embedding_processor.get_text_embedding(query, use_clap=False)
+
+        # Search in text tables for 20 results
+        text_results = self.db.search_songs(openai_vector, self.db.tables["text"], top_k)
+        text_results = text_results.copy()
+        text_results["source"] = "text"
+
+        # candidate is the song name searched in text table
+        candidate_names = text_results["song_name"].tolist()
+        audio_results = self.db.search_songs(clap_vector, self.db.tables["audio"], top_k=200)
+        audio_results = audio_results[audio_results["song_name"].isin(candidate_names)].copy()
+        audio_results["audio_score"] = 1 - audio_results["_distance"]
+
+        search_db = lancedb.connect("./.lancedb_2")
+        text_df = search_db.open_table("music_text").to_pandas()
+        metadata_columns = ["artist", "lmm_description"]
+        merged = audio_results.merge(text_df[["song_name"] + metadata_columns], on="song_name", how="left")
+        # merged = merged.merge(metadata_table, on="song_name", how="left")
+
+        merged["score"] = merged["audio_score"]
+
+        final_recommendations = []
+        for _, row in merged.sort_values("score", ascending=False).iterrows():
+            # audio_path = self.db.generate_audio_path(row["artist"], row["song_name"])
+            final_recommendations.append({
+                "song_name": row["song_name"],
+                "artist": row["artist"],
+                "description": row["lmm_description"],
+                "similarity_score": row["score"],
+                #"similarity_audio": row.get("audio_score", 0),
+                #"similarity_text": row.get("text_score", 0),
+                #"sorce": "text,audio" if pd.notna(row.get("audio_score")) else "text",
+                #"audio_path": audio_path if os.path.exists(audio_path) else None
             })
 
         return final_recommendations
