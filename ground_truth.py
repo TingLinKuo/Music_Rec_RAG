@@ -1,0 +1,132 @@
+# ground_truth for text input
+
+Q1_GT = ['Coming Over - Short Version B',
+         'Takes Me to the Lake - Short Version A',
+         'Happy in the Puddles - Short Version C',
+         'The Valley Man - Short Version A',
+         'Happy Ukulele Whistle Pop',
+         'Happy Logo Ident',
+         'Ukulele Whistle (Loop)']
+Q2_GT = ['Positive Persistent Pluck Sequence 2',
+         'Electrix 2',
+         'The Indie Folk Acoustic Guitar Loop',
+         'Modern Club Party',
+         'Breaking News Opener']
+Q3_GT = ['Forever as a Melody - Short Version C',
+         'Mandolin Guitars',
+         'Shaal Region - Short Version',
+         'Spring Acoustic Guitar',
+         'The Indie Folk Acoustic Guitar Loop',
+         'Acoustic Guitar Romantic Bright']
+Q4_GT = ['Trickster - Short Version',
+         'The Valley Man - Short Version A',
+         'The Valley Man - Short Version B'
+         'For Kids',
+         'Happy Ukulele Whistle Pop',
+         'Happy Clap',
+         'Children',
+         'Happy Logo Ident',
+         'Ukulele Whistle (Loop)',
+         'Upbeat Happy Fun Logo']
+Q5_GT = ['No Land for a War Man - Short Version B',
+         'No Land for a War Man - Short Version A',
+         'Melancholic Sonata',
+         'Call from the Hills - Short Version B',
+         'Sad Piano',
+         'Welcome Dream Orchestral Logo Intro',
+         'Debussy Clair de Lune Slow Piano Intro',
+         'Debussy Clair de Lune Piano and Flute Intro']
+Q6_GT = ['Magnetic Storms - Short Version',
+         'Action Opening',
+         'The Oldest Man',
+         'Oriental Rock Opener 2',
+         'For An Opener']
+Q7_GT = ['Mysterious Musical Ident 2',
+         'Talk - Short Version',
+         'Emotional String Section Intro',
+         'Space Race - Short Version',
+         'Wonders of the Universe',
+         'Black Magic Drama Tension']
+Q8_GT = ['Fixed - Short Version B'
+         'Cinematic Fantasy Opener',
+         'Talk - Short Version',
+         'Otherworldly Tales Logo'
+         'Horror Trailer',
+         'A Dark War Horn',
+         'Into the Edge']
+Q9_GT = ['Voices - Short Version A',
+         'Jester - Short Version',
+         'Flow Free - Short Version',
+         'Day One - Short Version A',
+         'Health',
+         'Inspirational Music Loop',
+         'Orchestral News Intro']
+Q10_GT = ['Second Smile - Short Version A',
+          'A Furry Affair - Creative Cut - Alternative',
+          'Happy Halloween 4',
+          'Circus Game',
+          'Cartoon Capers',
+          'Upbeat Whimsical Orchestra',
+          'Italian Dance',
+          'Attack of the Elfmen',
+          'A Halloween']
+Q11_GT = ['Laid Back - Short Version A',
+          'Energetic Loop',
+          'Hard Rock Loop',
+          'Astral Annihilation',
+          'Oblivion Cult',
+          'Rancid Life - Short Version C',
+          'Personal Hero Intro Trailer Opener',
+          'Energy Punk Rock Logo',
+          'Dynamic Promo']
+Q12_GT = ['The Night of the Bowl',
+          'Mandolin Guitars',
+          'Shaal Region - Short Version',
+          'Acoustic Guitar Romantic Bright',
+          'Classic Waltz Ident']
+Q13_GT = ['Baritone Steel and Synth',
+          'Wild - Short Version',
+          'Mandolin Guitars',
+          'New World - Short Version B',
+          'Wild West Slow Dobro Guitar']
+Q14_GT = ['Sharp Knives - Instrumental Version',
+          'The Most Important - Intro - No SFX',
+          'Star Dust - Short Version',
+          'Infinite - Short Version',
+          'The Truth Is Close',
+          'Event Ceremony Logo',
+          'The Happy Intro',
+          'Cinematic Epic Trailer Intro']
+Q15_GT = ['Otherworldly Tales Logo',
+          'Wonders of the Universe'
+          'Documentary Background Loop',
+          'A Dark War Horn',
+          'Ethnic Quena Flute']
+Q16_GT = ['Little One - Short Version',
+          'I Remember - Short Version',
+          'Soft Piano Intro Logo',
+          'Peaceful Corporate Ambient Loop',
+          'Ambient Soundscape Background Loop']
+Q17_GT = ['Locked in Silence - Short Version C',
+          'Minor Ragtime Loop',
+          'Wild West Slow Dobro Guitar',
+          'Disco Guitar Groove',
+          'Blues Fingerpicking Guitar Loop']
+Q18_GT = ['How Could I Know - Intro'
+          'Circus Clown - Short Version',
+          'The Valley Man - Short Version A',
+          'The Valley Man - Short Version B',
+          'Shaal Region - Short Version',
+          'Acoustic Guitar Romantic Bright']
+Q19_GT = ['How Could I Know - Intro',
+          'Orchestral Classic',
+          'Emotional String Section Intro',
+          'Happy Snowflake',
+          'Upbeat Whimsical Orchestra',
+          'Magical Fantasy Tale']
+Q20_GT = ['Positive Persistent Pluck Sequence 2',
+          'Freaky Boy',
+          'Fashion House Loop',
+          'Energy Dance Loop',
+          'Modern Club Party',
+          'Disco Guitar Groove']
