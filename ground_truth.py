@@ -9,9 +9,9 @@ Q1_GT = ['Coming Over - Short Version B',
          'Ukulele Whistle (Loop)']
 Q2_GT = ['Positive Persistent Pluck Sequence 2',
          'Electrix 2',
-         'The Indie Folk Acoustic Guitar Loop',
+         'Energy Dance Loop',
          'Modern Club Party',
-         'Breaking News Opener']
+         'Psy Trance Progressive']
 Q3_GT = ['Forever as a Melody - Short Version C',
          'Mandolin Guitars',
          'Shaal Region - Short Version',
@@ -20,7 +20,7 @@ Q3_GT = ['Forever as a Melody - Short Version C',
          'Acoustic Guitar Romantic Bright']
 Q4_GT = ['Trickster - Short Version',
          'The Valley Man - Short Version A',
-         'The Valley Man - Short Version B'
+         'The Valley Man - Short Version B',
          'For Kids',
          'Happy Ukulele Whistle Pop',
          'Happy Clap',
@@ -33,7 +33,7 @@ Q5_GT = ['No Land for a War Man - Short Version B',
          'Melancholic Sonata',
          'Call from the Hills - Short Version B',
          'Sad Piano',
-         'Welcome Dream Orchestral Logo Intro',
+         'Wrongs',
          'Debussy Clair de Lune Slow Piano Intro',
          'Debussy Clair de Lune Piano and Flute Intro']
 Q6_GT = ['Magnetic Storms - Short Version',
@@ -47,10 +47,10 @@ Q7_GT = ['Mysterious Musical Ident 2',
          'Space Race - Short Version',
          'Wonders of the Universe',
          'Black Magic Drama Tension']
-Q8_GT = ['Fixed - Short Version B'
+Q8_GT = ['Fixed - Short Version B',
          'Cinematic Fantasy Opener',
          'Talk - Short Version',
-         'Otherworldly Tales Logo'
+         'Otherworldly Tales Logo',
          'Horror Trailer',
          'A Dark War Horn',
          'Into the Edge']
@@ -98,7 +98,7 @@ Q14_GT = ['Sharp Knives - Instrumental Version',
           'The Happy Intro',
           'Cinematic Epic Trailer Intro']
 Q15_GT = ['Otherworldly Tales Logo',
-          'Wonders of the Universe'
+          'Wonders of the Universe',
           'Documentary Background Loop',
           'A Dark War Horn',
           'Ethnic Quena Flute']
@@ -112,7 +112,7 @@ Q17_GT = ['Locked in Silence - Short Version C',
           'Wild West Slow Dobro Guitar',
           'Disco Guitar Groove',
           'Blues Fingerpicking Guitar Loop']
-Q18_GT = ['How Could I Know - Intro'
+Q18_GT = ['How Could I Know - Intro',
           'Circus Clown - Short Version',
           'The Valley Man - Short Version A',
           'The Valley Man - Short Version B',
