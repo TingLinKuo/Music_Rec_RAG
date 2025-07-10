@@ -10,6 +10,9 @@ from multimodal_lancedb import MusicDatabase
 from lancedb.rerankers import CohereReranker
 import lancedb
 import pyarrow as pa
+import random
+from google import genai
+from google.genai import types
 
 class EmbeddingProcessor:
     def __init__(self, clap_model_name: str = "laion/clap-htsat-unfused"):
@@ -27,6 +30,7 @@ class EmbeddingProcessor:
         
         # Initialize OpenAI
         self.llm = OpenAI()
+        self.google_api_key = os.getenv("GEMINI_API_KEY")
     
     def get_audio_embedding(self, audio_path: str) -> np.ndarray:
         """Get audio embedding using CLAP"""
@@ -101,24 +105,38 @@ class MusicSearchSystem:
                 print(f"Error processing audio for {audio_file['song_name']}: {str(e)}")
                 continue
     
-    def search_music(self, query: str, top_k: int = 200) -> str:
+    def search_music(self, query: str, top_k: int = 200, rerank: bool = True, use_top_n_context: int = 1) -> Dict:
         """
         Search for music using both audio and text embeddings
         
         Args:
             query (str): Search query
             top_k (int): Number of results to return of each embedding
-            
+            use_top_n_context (int): Number of top results to include in context for explanation
+        
         Returns:
             str: LLM-generated explanation of recommendations
         """
         ranker = Ranker(db=self.db, weight=(0.3, 0.7))
-        recommendations = ranker.ranking_score_based(query, top_k)
+        recommendations, recommendations_rerank = ranker.ranking_score_based(query, top_k)
         # recommendations = ranker.ranking_text_then_audio_rerank(query, top_k)
-
+        final_recs = recommendations_rerank if rerank else recommendations
+        explanation_context = [
+        {
+            "song_name": rec["song_name"],
+            "artist": rec["artist"],
+            "combined_info": rec["combined_info"]
+        }
+        for rec in final_recs[:use_top_n_context]
+        ]
+        choice, recommendation_block, prompt, explanation = self._generate_explanation(query, explanation_context)
+        
         return {
-            "final_results": recommendations,
-            # "explanation": explanation
+            "choice": choice,
+            "final_results": final_recs,
+            "retrieval_context": recommendation_block,
+            "explanation_prompt": prompt,
+            "explanation": explanation
         }
         # return {
         # "audio_results": audio_results['song_name'].tolist(),
@@ -129,46 +147,114 @@ class MusicSearchSystem:
         # }
     
     def _generate_explanation(self, query: str, recommendations: List[Dict]) -> str:
-        """Generate LLM explanation for recommendations"""
-        prompt = f"""As a professional music recommendation assistant, please generate a natural and detailed recommendation description based on the user's preferences and the characteristics of the recommended songs.
+        """
+        Generate explanation from LLM based on user query and the retrieved songs.
+        This version uses combined_info and supports 1~3 context variations.
+        """
 
+        fake = """Assaf Ayalon - My Rhapsody Sounds - Short Version A
+        Information: Moods: Uplifting, Happy, Carefree, Love, Playful. Video Themes: Business, Food, Education, Lifestyle, Urban. Instruments: Acoustic Guitar, Keys. Genres: Cinematic, Acoustic, Pop, Folk, Children, Corporate. Other tags: . Description: A positive and uplifting acoustic folk track with an upbeat rhythm and a happy melody. The acoustic guitar strums a catchy rhythm while the piano and celeste play a beautiful melody. The bass and drums add a lively beat to the track. This music is perfect for use in commercials, advertising, and other media projects that need a cheerful and optimistic mood.
+        """
+        fake_2 = '''Swirling Ship - Fixed - Short Version B
+        Information: Moods: Serious, Dramatic, Scary, Dark. Video Themes: Time-Lapse, Drone Shots, Nature, Slow Motion. Instruments: Electric Guitar, Synth, Electronic Drums, Pads. Genres: Ambient, Country, Cinematic. Other tags: . Description: The music is mysterious and dramatic, featuring a soothing flute melody, evocative strings, and atmospheric pads. The mood is suspenseful and ominous, creating a sense of tension and intrigue. The instruments include the flute, strings, and pads. This music would be suitable for a wide range of video themes, including crime and mystery, horror, and suspense. It could also be used in documentaries, video games, and trailers to create a sense of tension and anticipation.
+        '''    
+        fake_3 = """The Mind Sweepers - Laid Back - Short Version A
+        Information: Moods: Powerful, Serious, Angry. Video Themes: Road Trip, Sport & Fitness, Fashion, Industry. Instruments: Electric, Guitar, Acoustic Drums. Genres: Rock. Other tags: . Description: This is a powerful and energetic rock music track with catchy electric guitar riffs, hard hitting drums, and upbeat bass. The track is perfect for use in sports videos, advertising, commercials, corporate videos, and more. It will certainly add a touch of energy and excitement to your project."""
+
+        recommendation_block = ""
+
+        for i, rec in enumerate(recommendations, 1):
+            recommendation_block += f"{i}. {rec['artist']} - {rec['song_name']}\n"
+            recommendation_block += f"Information: {rec['combined_info']}\n\n"
+        
+        prompt = f"""You are a professional music recommendation assistant.
+        Based on the following user need and the details of recommended songs, please generate a natural, clear, and engaging explanation.
+        
         User needs: {query}
 
         Recommended songs:
-        """
-        for i, rec in enumerate(recommendations, 1):
-            # similarity percentage
-            similarity_percentage = (1 - rec["similarity_score"]) * 100
-            prompt += f"""
-                {i}. {rec['song_name']} - {rec['artist']}
-                Genre: {rec['genre']}
-                Mood: {rec['mood']}
-                Video Theme: {rec['video_theme']}
-                Instrument: {rec['instrument']}
-                Other tags: {rec['other_tags']}
-                BPM: {rec['bpm']}
-                Desciption: {rec['description']}
-                Similarity: {similarity_percentage:.1f}%
-        """
+        {recommendation_block}
 
-        prompt += """
-        Based on the above information, please explain:
-        1. Description of why these songs fit the user
-        2. Reasons for recommending these songs
-        3. Characteristics of these songs
+        Based on the user's need and the details of the recommended songs, please provide a concise explanation that addresses the following:
 
-        Explain in a clear, understandable way, in a natural and friendly tone."""
+        1. Why these songs match the user's need — or, if they don't match well, explain why.
+        2. The reasons for selecting them - or, if inappropriate, highlight any mismatches or uncertainty.
+        3. Their overall musical characteristics
+
+        If the user's query is vague, confusing, or difficult to interpret, you may acknowledge the ambiguity and state that a strong connection cannot be determined.
+        If the user's query does not appear to relate to music or song preferences at all, you should clearly state that no musical connection can be reasonably inferred.
+        Be honest and objective. Do not invent or exaggerate connections. It is acceptable to express limitations or doubts.
+
+
+        Keep the explanation under 100 words and no more than 5 sentences. Make it clear, specific, and easy for users to understand the connection between their need and the recommended music. Avoid redundancy."""
+        # and either attempt a reasonable interpretation or 
+        # Define system prompt
+        GENERATION_SYS_PROMPT = """You are a professional music recommendation assistant who is good at explaining music characteristics and reasons for recommendation."""
+        
+        # Choose the LLM to use for explanation generation
+        choice = ["openai", "gemini"][0] 
+        if choice == "openai":
+            # Use OpenAI to generate the explanation
+            response = self.embedding_processor.llm.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": GENERATION_SYS_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+
+            return_content = response.choices[0].message.content
+
+        if choice == "gemini":
+        # Use Google Gemini for explanation
+            client = genai.Client(api_key=self.embedding_processor.google_api_key)
+            response = client.models.generate_content(
+                model="gemini-1.5-pro",
+                config=types.GenerateContentConfig(
+                    system_instruction=GENERATION_SYS_PROMPT,
+                    temperature=0.3
+                ),
+                contents=prompt
+            )
+
+            return_content = response.text
+
+        return choice, recommendation_block, prompt, return_content
+
+    def rewrite_query_from_history(self, user_input: str, memory):
+        history = memory.load_memory_variables({})["history"] # memory is from langchain
+        history_str = "\n".join(f"{msg.type}: {msg.content}" for msg in history)
+
+        system_prompt = (
+        "You are a helpful assistant that rewrites user queries based on conversation history. "
+        "Your job is to infer the user's full intent and produce a clear and complete music-related query."
+        )
+
+        user_prompt = f"""
+        Here is the conversation history:
+        {history_str}
+
+        The user just said:
+        "{user_input}"
+
+        Please rewrite it as a clear, specific, and standalone query suitable for searching music.
+        Do not introduce new preferences or details that were not explicitly mentioned.
+        Only output the rewritten query. Do not include any explanations or extra text.
+        """.strip()
 
         response = self.embedding_processor.llm.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o",
             messages=[
-                {"role": "system", "content": "You are a professional music recommendation assistant who is good at explaining music characteristics and reasons for recommendation."},
-                {"role": "user", "content": prompt}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
             ],
             temperature=0.3
         )
 
-        return response.choices[0].message.content
+        rewritten_query = response.choices[0].message.content.strip()
+        return rewritten_query
+
 
 class Ranker:
     def __init__(self, db, weight: Tuple[float, float] = (0.5, 0.5)):
@@ -214,13 +300,15 @@ class Ranker:
         # Normalize distances
         def normalize_column(df, source_name):
             mask = df["source"] == source_name
-            distances = df.loc[mask, "_distance"]
+            distances = df.loc[mask, "_distance"] # 取出對應來源的 distance (from searching LanceDB)，_distance = 1 - cosine_similarity，_distance 越小越相似
+            # 取得來源之最大、最小距離用於 normalization
             min_val = distances.min()
             max_val = distances.max()
             norm_col = f"{source_name}_normalized_distance"
+            # range 0~1
             df.loc[mask, norm_col] = (distances - min_val) / (max_val - min_val)
             return df
-
+        # Do normalization for both audio and text
         combined = normalize_column(combined, "audio")      
         combined = normalize_column(combined, "text")
         
@@ -238,37 +326,24 @@ class Ranker:
                 "lmm_description": lambda x: next((val for val in x if pd.notna(val)), None),
                 "audio_normalized_distance": "min",
                 "text_normalized_distance": "min",
-                "source": lambda x: ",".join(sorted(set(x)))
+                "source": lambda x: ",".join(sorted(set(x))),
+                "combined_info": lambda x: next((val for val in x if pd.notna(val)), None)
             })
             .reset_index()
         )
 
         # Compute weighted score per song (加權階段)
         def compute_weighted_score(row):
-            audio_sim = 1 - row["audio_normalized_distance"] if pd.notna(row["audio_normalized_distance"]) else None
-            text_sim = 1 - row["text_normalized_distance"] if pd.notna(row["text_normalized_distance"]) else None
+            audio_sim = 1 - row["audio_normalized_distance"] if pd.notna(row["audio_normalized_distance"]) else None # 1 - distance, 再做一次反轉，越大越相似
+            text_sim = 1 - row["text_normalized_distance"] if pd.notna(row["text_normalized_distance"]) else None # 1 - distance, 再做一次反轉，越大越相似
             w_audio = self.audio_weight if audio_sim is not None else 0
             w_text = self.text_weight if text_sim is not None else 0
             total = w_audio + w_text if (w_audio + w_text) > 0 else 1
             return ((audio_sim or 0) * w_audio + (text_sim or 0) * w_text) / total
-                  
-            # sources = group["source"].tolist()
-            # distances = group["_distance"].tolist()
-            # # this is for text and audio are found
-            # if len(distances) == 2:
-            #     return self.audio_weight * distances[sources.index("audio")] + \
-            #            self.text_weight * distances[sources.index("text")]
-            # elif sources[0] == "audio":
-            #     return self.audio_weight * distances[0] + self.text_weight  # penalize missing text
-            # else:
-            #     return self.text_weight * distances[0] + self.audio_weight  # penalize missing audio
 
         grouped["score"] = grouped.apply(compute_weighted_score, axis=1)
-        # grouped["score"] = grouped["song_name"].map(
-        #     lambda name: compute_weighted_score(combined[combined["song_name"] == name])
-        # )
 
-        # Extract individual raw distances ===
+        # Extract individual raw distances
         def get_distance(name: str, source: str):
             match = combined[(combined["song_name"] == name) & (combined["source"] == source)]
             return float(match["_distance"].iloc[0]) if not match.empty else None
@@ -317,8 +392,9 @@ class Ranker:
         
         # Format final output for LLM explanation or downstream use
         final_recommendations = []
-        for _, row in top_songs.sort_values("_relevance_score", ascending=False).head(rerank_top_n).iterrows():
-        # for _, row in grouped.sort_values("score", ascending=False).head(top_k).iterrows():
+        final_recommendations_rerank = []
+        # for _, row in top_songs.sort_values("_relevance_score", ascending=False).head(rerank_top_n).iterrows():
+        for _, row in grouped.sort_values("score", ascending=False).head(top_k).iterrows():
             final_recommendations.append({
                 "song_name": row["song_name"],
                 "artist": row["artist"],
@@ -330,15 +406,38 @@ class Ranker:
                 #"bpm": row["bpm"],
                 "description": row["lmm_description"],
                 # This is from LanceDB return
+                "audio_distance": row["audio_distance"],
+                "text_distance": row["text_distance"],
+                "similarity_score": row["score"],
+                "similarity_audio": 1 - row["audio_normalized_distance"],
+                "similarity_text": 1 - row["text_normalized_distance"],
+                "source": row["source"],
+                #"rerank_score": row["_relevance_score"],
+                "audio_path": row["audio_path"],
+                "combined_info": row["combined_info"]
+            })
+            
+        for _, row in top_songs.sort_values("_relevance_score", ascending=False).head(rerank_top_n).iterrows():
+            final_recommendations_rerank.append({
+                "song_name": row["song_name"],
+                "artist": row["artist"],
+                "mood": row["mood"],
+                "video_theme": row["video_theme"],
+                "genre": row["genre"],
+                "instrument": row["instrument"],
+                "other_tags": row["other_tags"],
+                "description": row["lmm_description"],
+                # This is from LanceDB return
                 "similarity_score": row["score"],
                 "similarity_audio": 1 - row["audio_normalized_distance"],
                 "similarity_text": 1 - row["text_normalized_distance"],
                 "source": row["source"],
                 "rerank_score": row["_relevance_score"],
-                "audio_path": row["audio_path"]
+                "audio_path": row["audio_path"],
+                "combined_info": row["combined_info"]
             })
-        
-        return final_recommendations
+
+        return final_recommendations, final_recommendations_rerank
     
     # usefull function because its result is not good
     def ranking_text_then_audio_rerank(self, query: str, top_k: int = 20) -> List[Dict]:
@@ -381,41 +480,62 @@ class Ranker:
 
         return final_recommendations
 
-# evaluation function
-class Evaluator:
-    def __init__(self, gt: List[str], recs: List[str]):
-        self.gt = gt
-        self.recs = recs
+class RankingEvaluator:
+    def __init__(self, k: int):
+        self.k = k
 
-    def evaluate(self, k: int) -> Dict[str, float]:
-        """Evaluate the recommendations using various metrics"""
-        precision = precision_at_k(self.gt, self.recs, k)
-        recall = recall_at_k(self.gt, self.recs, k)
-        ndcg = ndcg_at_k(self.gt, self.recs, k)
-        
+    def precision_at_k(self, gt, recs):
+        recs_at_k = recs[:self.k]
+        relevant = [r for r in recs_at_k if r in gt]
+        return len(relevant) / self.k
+
+    def recall_at_k(self, gt, recs):
+        recs_at_k = recs[:self.k]
+        relevant = [r for r in recs_at_k if r in gt]
+        return len(relevant) / len(gt) if len(gt) > 0 else 0.0
+
+    def ndcg_at_k(self, gt, recs):
+        recs_at_k = recs[:self.k]
+        dcg = 0.0
+        for i, rec in enumerate(recs_at_k):
+            if rec in gt:
+                dcg += 1 / np.log2(i + 2)  # log2(i+2) since i starts from 0
+        ideal_rels = [1] * min(len(gt), self.k)
+        idcg = sum([rel / np.log2(i + 2) for i, rel in enumerate(ideal_rels)])
+        return dcg / idcg if idcg > 0 else 0.00
+
+    def average_precision(self, gt, recs):
+        hits = 0
+        precisions = []
+        for i, rec in enumerate(recs):
+            if rec in gt:
+                hits += 1
+                precisions.append(hits / (i + 1))
+        return sum(precisions) / len(gt) if gt else 0.0
+
+    def evaluate(self, gt, recs, method_name):
         return {
-            "precision": precision,
-            "recall": recall,
-            "ndcg": ndcg
+            'Method': method_name,
+            f'Precision@{self.k}': self.precision_at_k(gt, recs),
+            f'Recall@{self.k}': self.recall_at_k(gt, recs),
+            f'nDCG@{self.k}': self.ndcg_at_k(gt, recs),
+            'MAP': self.average_precision(gt, recs)
         }
-    
-# Evaluation metrics
-def precision_at_k(gt, recs, k):
-    recs_at_k = recs[:k]
-    relevant = [r for r in recs_at_k if r in gt]
-    return len(relevant) / k
 
-def recall_at_k(gt, recs, k):
-    recs_at_k = recs[:k]
-    relevant = [r for r in recs_at_k if r in gt]
-    return len(relevant) / len(gt) if len(gt) > 0 else 0.0
+    def evaluate_random_baseline(self, gt, pool, n):
+        precision_scores, recall_scores, ndcg_scores, map_scores = [], [], [], []
 
-def ndcg_at_k(gt, recs, k):
-    recs_at_k = recs[:k]
-    dcg = 0.0
-    for i, rec in enumerate(recs_at_k):
-        if rec in gt:
-            dcg += 1 / np.log2(i + 2)  # log2(i+2) since i starts from 0
-    ideal_rels = [1] * min(len(gt), k)
-    idcg = sum([rel / np.log2(i + 2) for i, rel in enumerate(ideal_rels)])
-    return dcg / idcg if idcg > 0 else 0.0
+        for _ in range(n):
+            recs = random.sample(pool, self.k)
+            precision_scores.append(self.precision_at_k(gt, recs))
+            recall_scores.append(self.recall_at_k(gt, recs))
+            ndcg_scores.append(self.ndcg_at_k(gt, recs))
+            map_scores.append(self.average_precision(gt, recs))
+
+        return {
+            'Method': 'Baseline (Random)',
+            f'Precision@{self.k}': np.mean(precision_scores),
+            f'Recall@{self.k}': np.mean(recall_scores),
+            f'nDCG@{self.k}': np.mean(ndcg_scores),
+            'MAP': np.mean(map_scores)
+        }
