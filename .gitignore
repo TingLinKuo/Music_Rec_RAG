@@ -1,1 +1,9 @@
+# environment variables
 .env
+
+# Python
+__pycache__/
+.ipynb_checkpoints/
+
+# LanceDB
+.lancedb_temp/
